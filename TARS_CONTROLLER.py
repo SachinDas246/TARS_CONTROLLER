@@ -1,18 +1,16 @@
 #--------------------- Import Librariesc -------------------------------------------------|
-from controller import Robot,Keyboard
+from controller import Robot,Keyboard,Supervisor
 import numpy as np
 import random
 from gym import Env
 from gym.spaces import Discrete,Box
 #import tensorflow as tf
 #---------------------- Initilise Robot --------------------------------------------------|
-robot = Robot()
+robot = Supervisor()
 timestep = int(robot.getBasicTimeStep())
 
 #---------------------- Initilize Devices ------------------------------------------------|
 
-keyboard=Keyboard()
-keyboard.enable(timestep)
 
 m0 = robot.getDevice('m0')
 m1 = robot.getDevice('m1')
@@ -49,6 +47,13 @@ m4.setVelocity(1)
 
 
 #-------------------- Pre Functions -----------------------------------------------------|
+def get_random(min,max,emin,emax):
+    v = np.random.uniform(min,max)
+    print(v)
+    while v < emax and v>emin :
+        print(v)
+        v = np.random.uniform(min,max)
+    return v        
 
 def IsMotionComplete(mi0,mi1,mi2,mi3,mi4,fact): #check if motion has compleated
     if mi0*(1-fact) <= p0.getValue() <= mi0*(fact+1):
@@ -71,35 +76,63 @@ def IsMotionComplete(mi0,mi1,mi2,mi3,mi4,fact): #check if motion has compleated
 
 
 def PosInit():#used for setting initial random values to motor
-    mv0 = np.random.uniform(0,6.2831853072)
-    mv1 = np.random.uniform(0,2.0943951024)
-    mv2 = np.random.uniform(0,2.0943951024)
-    mv3 = np.random.uniform(0,2.0943951024)
-    mv4 = np.random.uniform(0,2.0943951024)
+    # set position of load at random
+    lpx = get_random(-0.33,0.33,-0.16,0.16)
+    lpz = get_random(-0.33,0.33,-0.16,0.16)    
+    robot.getFromDef("load").getField("translation").setSFVec3f([lpx,0.0299986,lpz])
+    dpx = get_random(-0.33,0.33,-0.16,0.16)
+    dpz = get_random(-0.33,0.33,-0.16,0.16)
+    
+    isoutside = False
+    while not isoutside:
+        mv0 = np.random.uniform(0,6.2831853072)
+        mv1 = np.random.uniform(0,2.0943951024)
+        mv2 = np.random.uniform(0,2.0943951024)
+        mv3 = np.random.uniform(0,2.0943951024)
+        mv4 = np.random.uniform(0,2.0943951024)  
+        
+        
+        m0.setPosition(mv0)    
+        m1.setPosition(mv1)
+        m2.setPosition(mv2)
+        m3.setPosition(mv3)
+        m4.setPosition(mv4)
+        
+        robot.getFromDef("jp0").getField("position").setSFFloat(mv0)
+        robot.getFromDef("jp1").getField("position").setSFFloat(mv1)
+        robot.getFromDef("jp2").getField("position").setSFFloat(mv2)
+        robot.getFromDef("jp3").getField("position").setSFFloat(mv3)
+        robot.getFromDef("jp4").getField("position").setSFFloat(mv4)
+        
+        #check if initial position is in restricted area        
+        
+        robot.step(timestep)
+        robot.step(timestep)
+        
+        tpos = gps.getValues()
+        if tpos[1] < 0.01:
+            isoutside = False
+            continue
+        if (tpos[0] < 0.12 and tpos[0] >-0.12) and (tpos[2] < 0.12 and tpos[2] >-0.12) :
+            isoutside = False
+            continue
+        isoutside = True
+        break
+    
+       
     c =  random.randint(0, 1)
     
     # check if connection is possible
     islockable = c1.getPresence()
-        
-    m0.setPosition(mv0)
-    m1.setPosition(mv1)
-    m2.setPosition(mv2)
-    m3.setPosition(mv3)
-    m4.setPosition(mv4)
     
     if c == 1:
         c1.lock()
     else:
-        c1.unlock()    
-    
-    
-    while not IsMotionComplete(mv0, mv1, mv2, mv3, mv4, 0.001):
-        if robot.step(timestep) == -1:
-            break
+        c1.unlock()   
     
     pos = gps.getValues()
-    print(c1.isLocked())         
-    return [mv0,mv1,mv2,mv3,mv4,pos[0],pos[1],pos[2],c,islockable]
+            
+    return [mv0,mv1,mv2,mv3,mv4,pos[0],pos[1],pos[2],c,islockable,lpx,0.0299986,lpz,dpx,0.0299986,dpz]
 
 
 
@@ -137,11 +170,11 @@ class tars(Env):
     def step(self,action):        
         self.episod_length -=1
         #apply action to state variables action
-        self.state[0] += action[0]
-        self.state[1] += action[1]
-        self.state[2] += action[2]
-        self.state[3] += action[3]
-        self.state[4] += action[4]
+        self.state[0] += (action[0]*0.01745329252)
+        self.state[1] += (action[1]*0.01745329252)
+        self.state[2] += (action[2]*0.01745329252)
+        self.state[3] += (action[3]*0.01745329252)
+        self.state[4] += (action[4]*0.01745329252)
         
         if action[5] >0 :
             self.state[8] = 1
@@ -154,15 +187,25 @@ class tars(Env):
         #Update robot
         robot.step(timestep)
         
-        # get observation
+        # get observations
+        state[0]=p0.getValue()
+        state[1]=p1.getValue()
+        state[2]=p2.getValue()
+        state[3]=p3.getValue()
+        state[4]=p4.getValue()
+        
+        cpos = gps.getValues()
+        
+        state[5]=cpos[0]
+        state[6]=cpos[1]
+        state[7]=cpos[2]
+        
+        
+        
         
         #calculate reward
         
-        
-        
-        
-                
-        
+ 
             
             
         
@@ -174,11 +217,12 @@ class tars(Env):
      
 
 
-print(PosInit())
+PosInit()
 
-while robot.step(timestep) != -1:
+#while robot.step(timestep) != -1:
+    #print()
     
-    pass
+    #pass
     
     
         
